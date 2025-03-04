@@ -38,13 +38,26 @@ cities <- c("Charlotte", "Los Angeles", "Houston", "Indianapolis", "Jacksonville
 #> Call the function "read_weather" 
 #> Check by reading/glimpsing a single station's file
 
+read_weather <- function(dir,station){
+  file_name_temp <- str_c(dir,"/", station, ".csv")
+  ds_temp <- read_csv (file_name_temp)
+  ds_temp <- cbind(ds_temp,station = station) %>% 
+    mutate(date=as.Date(date))
+  return(ds_temp)
+}
 
+dir <- "us-weather-history"
+glimpse(read_weather (dir, "KCLT"))
 
 # QUESTION 2
 #> Use map() and your new function to read in all 10 stations
 #> Note that because map_dfr() has been superseded, and map() does not automatically bind rows, you will need to do so in the code.
 #> Save the resulting dataset to "ds"
 
+ds <- tibble()
+for (station in stations){
+  ds <- rbind(ds, read_weather(dir,station))
+}
 
 
 # QUESTION 3
@@ -52,18 +65,28 @@ cities <- c("Charlotte", "Los Angeles", "Houston", "Indianapolis", "Jacksonville
 #> (station should be the level and city should be the label)
 #> Use fct_count to check that there are 365 days of data for each city 
 
+ds <- ds %>% 
+  mutate (city = factor(station, levels=stations, labels=cities))
 
+count <- fct_count (ds$city)
+sum(count$n != 365)
 # QUESTION 4
 #> Since we're scientists, let's convert all the temperatures to C
 #> Write a function to convert F to C, and then use mutate across to 
 #> convert all of the temperatures, rounded to a tenth of a degree
+F_convert_C <- function (F){
+  C <- (F-32)*5/9
+}
 
-
-
+ds <- ds %>% 
+  mutate(across(ends_with("_temp"), F_convert_C)) %>% 
+  mutate(across(ends_with("_temp"), ~round(.x,digits=1)))
 ### CHECK YOUR WORK
 #> At this point, your data should look like the "compiled_data.csv" file
 #> in data-clean. If it isn't, read in that file to use for the remaining
 #> questions so that you have the right data to work with.
+compiled_data <- read_csv("data-clean/compiled_data.csv")
+all(ds == compiled_data, na.rm = TRUE)
 
 # QUESTION 5
 #> Write a function that counts the number of extreme temperature days,
@@ -73,13 +96,24 @@ cities <- c("Charlotte", "Los Angeles", "Houston", "Indianapolis", "Jacksonville
 #> and sort in descending order to show which city had the most:
 #> (Seattle, 20, Charlotte 12, Phoenix 12, etc...)
 #> Don't save this summary over the original dataset!
-
-
+count_ext_days <- function(.){
+  (.) %>% 
+    mutate(extreme_day = (actual_min_temp==record_min_temp | actual_max_temp==record_max_temp)) %>% 
+    group_by(city) %>% 
+    summarize(day_num = sum(extreme_day)) %>% 
+    arrange(desc(day_num))
+}
+ds %>% 
+  count_ext_days()
 
 # QUESTION 6
 #> Pull out the month from the date and make "month" a factor
 #> Split the tibble by month into a list of tibbles 
+ds <- ds %>% 
+  mutate(month = factor(month(date))) 
 
+ds_list <- ds %>% 
+  split(.$month)
 
 
 # QUESTION 7
@@ -87,7 +121,19 @@ cities <- c("Charlotte", "Los Angeles", "Houston", "Indianapolis", "Jacksonville
 #> and the average_precipitation (across all cities), and between the actual and average mins/maxes
 #> Use a for loop, and print the month along with the resulting correlation
 #> Look at the documentation for the ?cor function if you've never used it before
-
+for (i in 1:12){
+  ds_mon <- ds_list [[i]]
+  cat("month=",i,'\n',sep="")
+  
+  cor <- round(cor(ds_mon$actual_precipitation, ds_mon$average_precipitation),2)
+  cat("actual_precipitation & average_precipitation: ",cor,'\n')
+  
+  cor <- round(cor(ds_mon$actual_min_temp, ds_mon$average_min_temp),2)
+  cat("actual_min_temp & average_min_temp: ",cor,'\n')
+  
+  cor <- round(cor(ds_mon$actual_max_temp, ds_mon$average_max_temp),2)
+  cat("actual_max_temp & average_max_temp: ",cor,'\n')
+}
 
 
 
@@ -97,15 +143,21 @@ cities <- c("Charlotte", "Los Angeles", "Houston", "Indianapolis", "Jacksonville
 #> Finally, use plot_correlation to investigate correlations between the continuous variables only
 #> Check the documentation for plot_correlation for an easy way to do this
 
+ds %>% select(city, actual_mean_temp:record_precipitation) %>% plot_boxplot(by = "city")
 
+ds %>% select(month, actual_mean_temp:record_precipitation) %>% plot_boxplot(by = "month")
 
+ds %>% select(actual_mean_temp:record_precipitation) %>% plot_correlation()
 
 # QUESTION 9
 #> Create a scatterplot of actual_mean_temp (y axis) by date (x axis)
 #> Use facet_wrap to make a separate plot for each city (3 columns)
 #> Make the points different colors according to month
 
-
+p <- ggplot(data=ds, aes(x=date,y=actual_mean_temp,color=month))+
+  geom_point()+
+  facet_wrap("city", ncol = 3)
+p
 
 
 # QUESTION 10
@@ -117,4 +169,20 @@ cities <- c("Charlotte", "Los Angeles", "Houston", "Indianapolis", "Jacksonville
 #> The eda folder has an example of what each plot should look like
 #> Call the function in a map or loop to generate graphs for each month
 
+ds <- ds %>% 
+  mutate(month_ab = factor(month, levels = 1:12, labels = month.abb))
 
+plot_temp_mon <- function(ds, mon){
+  p_temp <- ggplot(data=ds,aes(x=date,y=actual_mean_temp,color=city))+
+    geom_point()+
+    geom_line()+
+    ggtitle(mon)
+  file_name <- paste("eda/",mon,".png", sep="")
+  ggsave(file_name, width = 9, height = 4, units = "in")
+}
+
+for(i in 1:12){
+  ds_sub <- ds %>% 
+    filter(month==i)
+  plot_temp_mon(ds_sub,ds_sub$month_ab[1])
+}
